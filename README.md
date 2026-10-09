@@ -67,6 +67,12 @@ LDDC是一个简单易用的精准歌词(逐字歌词)下载匹配工具。
 
 见[LDDC使用指南](https://github.com/chenmozhijin/LDDC/wiki)
 
+### 本 fork 的 Agent CLI
+
+新增 `lddc` 命令，支持结构化 JSON 输出、独立 TOML 配置、本地音频检查、多来源歌曲搜索、只读候选匹配和本地歌词格式转换。
+安装、配置优先级、退出码和功能边界见 [CLI 使用说明](docs/CLI.md)，常用设置见 [配置示例](examples/cli.toml)。
+CLI 不启动图形界面，目前仍依赖 PySide6；桌面应用入口保持不变。
+
 ## 感谢
 
 部分功能实现参考了以下项目:

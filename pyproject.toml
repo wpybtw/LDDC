@@ -5,6 +5,7 @@ dependencies = [
     "PySide6-Essentials>=6.8.0",
     "httpx[brotli,http2]",
     "mutagen",
+    "tomli>=2; python_version < '3.11'",
     "diskcache",
     "charset-normalizer",
     "pyaes",
@@ -45,6 +46,9 @@ classifiers = [
     "Topic :: Multimedia :: Sound/Audio",
     "Topic :: Utilities",
 ]
+
+[project.scripts]
+lddc = "LDDC.cli.__main__:main"
 
 [project.urls]
 homepage = "https://github.com/chenmozhijin/LDDC"
@@ -118,3 +122,6 @@ max-complexity = 30  # C901
 "tests/**.py" = ["S101"]
 "tools/**.py" = ["T201", "INP001"]
 "LDDC/gui/ui/**.py" = ["N801", "N802", "N803", "N806", "ANN001", "ANN201", "ARG002", "E501", "CPY001"]
+# Delay Qt/core imports until CLI validation is complete and isolated paths are set.
+"LDDC/cli/**.py" = ["PLC0415"]
+"tests_cli/**.py" = ["S101", "PLC0415"]

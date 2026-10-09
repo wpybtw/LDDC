@@ -88,7 +88,7 @@ def get_audio_file_infos(file_path: Path) -> list[SongInfo]:
                     title=title,
                     artist=Artist(artist),
                     album=album,
-                    duration=int(audio.info.length) * 1000 if audio.info.length * 1000 else None,
+                    duration=round(audio.info.length * 1000) if audio.info.length else None,
                     path=file_path,
                 )
             else:

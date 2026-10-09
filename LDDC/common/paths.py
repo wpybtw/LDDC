@@ -79,6 +79,15 @@ match platform.system():
         raise OSError(msg)
 
 
+# Optional isolated state for headless clients; normal GUI paths stay unchanged.
+if state_dir_override := os.environ.get("LDDC_STATE_DIR"):
+    state_root = Path(state_dir_override).expanduser().resolve()
+    config_dir = state_root / "config"
+    data_dir = state_root / "data"
+    cache_dir = state_root / "cache"
+    log_dir = state_root / "logs"
+
+
 auto_save_dir = data_dir / "auto_save"
 
 

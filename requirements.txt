@@ -1,6 +1,7 @@
 httpx[brotli,http2]
 PySide6-Essentials>=6.8.0
 mutagen
+tomli>=2; python_version < '3.11'
 diskcache
 charset-normalizer
 pyaes

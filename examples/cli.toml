@@ -1,0 +1,31 @@
+# LDDC CLI: command-line options override these settings.
+# This file is independent of the desktop application's configuration.
+[search]
+sources = ["NE", "QM", "KG"]
+limit = 10
+
+[network]
+# Deadline for EACH source attempt, including provider initialization.
+timeout_seconds = 20.0
+retries = 1
+workers = 3
+# Empty means inherit HTTP_PROXY / HTTPS_PROXY / ALL_PROXY.
+proxy = ""
+
+[match]
+# Heuristic similarity, NOT a probability or synchronization guarantee.
+min_score = 70.0
+duration_tolerance_ms = 4000
+top_k = 5
+
+[files]
+recursive = false
+
+[output]
+format = "lrc"
+languages = ["orig", "ts"] # orig: original, ts: translation, roma: romanization
+offset_ms = 0
+directory = "" # Relative paths are relative to this config file.
+overwrite = false
+lrc_ms_digits = 3
+add_end_timestamp = false
