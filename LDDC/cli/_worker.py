@@ -12,7 +12,7 @@ from .runtime import initialize, serialize
 
 def request(payload: dict) -> dict:
     initialize(Path(payload["state_dir"]), payload["settings"])
-    from LDDC.common.models import SearchType
+    from LDDC.common.models import SearchType, SongInfo
 
     source = payload["source"]
     # Import only the requested provider. The aggregate API initializes all providers.
@@ -35,6 +35,17 @@ def request(payload: dict) -> dict:
     else:
         msg = "Unsupported source"
         raise ValueError(msg)
+    if payload.get("operation") == "download":
+        from .backend import render_lyrics
+
+        lyrics = provider.get_lyrics(SongInfo.from_dict(payload["song"]))
+        if not lyrics.get("orig"):
+            return {"error": {"code": "LYRICS_NOT_FOUND", "message": "Source has no original lyrics"}}
+        rendered = render_lyrics(lyrics, payload["settings"]) if payload["settings"]["download"]["save_sidecar"] else {}
+        rendered["available_languages"] = list(lyrics)
+        if payload["settings"]["download"]["write_tags"]:
+            rendered["tag_content"] = render_lyrics(lyrics, payload["settings"], for_tags=True)["content"]
+        return {"lyrics": rendered}
     results = provider.search(payload["query"], SearchType[payload["type"]], payload["page"])
     return {"items": [serialize(item) for item in list(results)[: payload["settings"]["search"]["limit"]]]}
 

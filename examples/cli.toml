@@ -21,6 +21,15 @@ top_k = 5
 [files]
 recursive = false
 
+[download]
+save_sidecar = true
+write_tags = false
+
+[tags]
+overwrite = false
+backup = true # Keep the first original audio as <filename>.lddc.bak.
+id3_version = "v2.3"
+
 [output]
 format = "lrc"
 languages = ["orig", "ts"] # orig: original, ts: translation, roma: romanization

@@ -1,6 +1,8 @@
 # SPDX-FileCopyrightText: Copyright (C) 2026 wpybtw
 # SPDX-License-Identifier: GPL-3.0-only
-"""Read-only discovery and candidate ranking, plus explicit local conversion."""
+"""Discovery, candidate ranking, provider isolation and local rendering."""
+
+from __future__ import annotations
 
 import json
 import os
@@ -10,8 +12,12 @@ import sys
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .runtime import initialize, serialize
+
+if TYPE_CHECKING:
+    from LDDC.common.models import Lyrics
 
 REMASTER_SUFFIX = re.compile(r"\s*[\[(（]\s*(?:\d{4}\s+)?remaster(?:ed)?(?:\s+\d{4})?\s*[\])）]\s*$", re.IGNORECASE)
 
@@ -38,10 +44,8 @@ def atomic_write(path: Path, content: str, overwrite: bool = False) -> None:
         temporary.unlink(missing_ok=True)
 
 
-def _source_search(source: str, query: str, search_type: str, page: int, settings: dict, state_dir: Path) -> dict:
-    if source == "LRCLIB" and search_type != "SONG":
-        return {"source": source, "items": [], "error": {"code": "UNSUPPORTED_SEARCH_TYPE", "message": "LRCLIB only supports song search"}}
-    payload = {"source": source, "query": query, "type": search_type, "page": page, "settings": settings, "state_dir": str(state_dir)}
+def provider_request(payload: dict, settings: dict, state_dir: Path) -> dict:
+    payload = {**payload, "settings": settings, "state_dir": str(state_dir)}
     env = os.environ.copy()
     if proxy := settings["network"]["proxy"]:
         for key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
@@ -64,13 +68,20 @@ def _source_search(source: str, query: str, search_type: str, page: int, setting
                 continue
             response = json.loads(process.stdout)
             if "error" not in response:
-                return {"source": source, "items": response["items"]}
+                return response
             error = response["error"]
         except subprocess.TimeoutExpired:
             error = {"code": "TIMEOUT", "message": "Source attempt exceeded its deadline"}
         except (ValueError, KeyError):
             error = {"code": "WORKER_PROTOCOL_ERROR", "message": "Provider worker returned invalid JSON"}
-    return {"source": source, "items": [], "error": error}
+    return {"error": error}
+
+
+def _source_search(source: str, query: str, search_type: str, page: int, settings: dict, state_dir: Path) -> dict:
+    if source == "LRCLIB" and search_type != "SONG":
+        return {"source": source, "items": [], "error": {"code": "UNSUPPORTED_SEARCH_TYPE", "message": "LRCLIB only supports song search"}}
+    response = provider_request({"source": source, "query": query, "type": search_type, "page": page}, settings, state_dir)
+    return {"source": source, "items": [], **response}
 
 
 def search(query: str, search_type: str, page: int, settings: dict, state_dir: Path) -> dict:
@@ -206,11 +217,8 @@ def match(path: Path, settings: dict, state_dir: Path) -> dict:
     return {"dry_run": True, "score_is_probability": False, "items": items, "errors": errors}
 
 
-def convert(path: Path, output: Path | None, settings: dict, state_dir: Path) -> dict:
-    initialize(state_dir, settings)
-    # LocalAPI avoids initializing network providers for an entirely offline operation.
+def render_lyrics(lyrics: Lyrics, settings: dict, for_tags: bool = False) -> dict:
     from LDDC.common.models import LyricsFormat
-    from LDDC.core.api.lyrics.local import LocalAPI
     from LDDC.core.converter import convert2
 
     formats = {
@@ -221,16 +229,29 @@ def convert(path: Path, output: Path | None, settings: dict, state_dir: Path) ->
         "ass": LyricsFormat.ASS,
         "json": LyricsFormat.JSON,
     }
-    lyrics = LocalAPI().get_lyrics(path=path)
-    output_format = formats[settings["output"]["format"]]
+    output_format = LyricsFormat.LINEBYLINELRC if for_tags else formats[settings["output"]["format"]]
     langs = None if output_format == LyricsFormat.JSON else settings["output"]["languages"]
+    if langs is not None and not any(lyrics.get(lang) or (lang == "ts" and lyrics.get("LDDC_ts")) for lang in langs):
+        msg = "No requested lyric languages are present"
+        raise ValueError(msg)
     text = convert2(lyrics, langs, output_format, settings["output"]["offset_ms"])
     if not text:
         msg = "No requested lyric languages are present"
         raise ValueError(msg)
+    return {"content": text, "extension": output_format.ext, "available_languages": list(lyrics), "types": serialize(lyrics.types)}
+
+
+def convert(path: Path, output: Path | None, settings: dict, state_dir: Path) -> dict:
+    initialize(state_dir, settings)
+    # LocalAPI avoids initializing network providers for an entirely offline operation.
+    from LDDC.core.api.lyrics.local import LocalAPI
+
+    rendered = render_lyrics(LocalAPI().get_lyrics(path=path), settings)
+    text = rendered.pop("content")
+    extension = rendered.pop("extension")
     if output is None and settings["output"]["directory"]:
-        output = Path(settings["output"]["directory"]).expanduser() / (path.stem + output_format.ext)
-    result = {"format": settings["output"]["format"], "available_languages": list(lyrics), "types": serialize(lyrics.types)}
+        output = Path(settings["output"]["directory"]).expanduser() / (path.stem + extension)
+    result = {"format": settings["output"]["format"], **rendered}
     if output is None:
         result["content"] = text
     else:

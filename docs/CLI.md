@@ -44,6 +44,15 @@ top_k = 3
 [files]
 recursive = true
 
+[download]
+save_sidecar = true
+write_tags = true # download 命令下载后自动写入歌词标签
+
+[tags]
+overwrite = false
+backup = true
+id3_version = "v2.3"
+
 [output]
 format = "lrc"
 languages = ["orig", "ts"]
@@ -66,7 +75,7 @@ add_end_timestamp = false
 
 默认文件不存在时使用内置默认值；显式指定但不存在的文件会报错。`config init` 永不覆盖已有文件；`config validate` 校验并返回生效设置。
 
-`output.directory` 的相对路径以**配置文件所在目录**为基准；命令行 `--output` 的相对路径以当前工作目录为基准。`directory` 为空且未传 `--output` 时，转换结果放在 JSON 的 `data.content` 中。
+`output.directory` 的相对路径以**配置文件所在目录**为基准；命令行 `--output` / `--output-dir` 的相对路径以当前工作目录为基准。对于 `convert`，`directory` 为空且未传 `--output` 时，转换结果放在 JSON 的 `data.content` 中。对于 `download`，`directory` 为空时在音频旁保存同名歌词文件。
 
 缓存、日志和核心内部配置使用配置文件旁的 `state/`。可用 `--state-dir PATH` 改变位置。它们与桌面应用的默认配置和缓存隔离；CLI 设置不会写入 GUI 的设置文件。
 
@@ -102,7 +111,7 @@ lddc search --query "example" --sources LRCLIB --timeout 15 --retries 0
 
 `--limit` 限制**每个来源当前页**返回的最大条目数，不跨页补齐。返回顺序遵循配置中的来源顺序及各来源原有顺序。
 
-`search` 和 `match` 共用 `--sources`、`--limit`、`--timeout`、`--retries`、`--workers`、`--proxy`。来源在独立子进程中执行；超时覆盖启动、来源初始化和请求整个过程。`retries = 1` 表示最多两次尝试；`workers` 控制同时执行的来源数。批量匹配逐首处理，匹配失败时可能追加一次仅标题搜索，因此目录任务总耗时可显著超过单次超时。
+`search`、`match` 和 `download` 共用 `--sources`、`--limit`、`--timeout`、`--retries`、`--workers`、`--proxy`。来源在独立子进程中执行；超时覆盖启动、来源初始化和请求整个过程。`retries = 1` 表示最多两次尝试；`workers` 控制同时执行的搜索来源数。批量匹配逐首处理，匹配失败时可能追加一次仅标题搜索，因此目录任务总耗时可显著超过单次超时。歌词下载也使用同样的子进程超时和重试设置，逐首、逐候选尝试。
 
 配置/参数中的代理支持不含凭据的 HTTP(S) URL。需要认证时使用代理环境变量；`proxy = ""` 继承 `HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY` 等环境设置。
 
@@ -113,11 +122,56 @@ lddc match "/path/to/album" --sources NE --dry-run --output ./candidates.json
 lddc match "/path/to/song.flac" --min-score 80 --duration-tolerance-ms 2000 --top-k 3
 ```
 
-当前 `match` **始终是只读候选匹配**，不写音频、不下载歌词。报告列出标题/歌手/专辑分项分数、时长差、可接受候选与被拒绝候选、版本风险提示。`--dry-run` 可显式标注这一行为；没有 apply 模式。`--output` 只保存 JSON 报告且拒绝覆盖已有文件。
+`match` **始终是只读候选匹配**，不写音频、不下载歌词，即使配置开启了自动标签写入也是如此。报告列出标题/歌手/专辑分项分数、时长差、可接受候选与被拒绝候选、版本风险提示。`--dry-run` 可显式标注这一行为；写操作使用下面的 `download` 命令。`--output` 只保存 JSON 报告且拒绝覆盖已有文件。
 
 分数是相似度启发式，**不是正确率，也不是歌词同步验证**。评分复用核心文本算法；标题和歌手完全相同时，即使专辑不同仍可能得到 100 分。请检查 `album_mismatch`、`remaster_candidate`、`duration_unknown` 等警告。缺少时长时不能执行时长过滤，会保留警告。所有候选的 `audio_sync_verified` 都是 `false`。
 
 CLI 对标题末尾括号中的 `Remaster` / `Remastered`（可带年份）先移除版本标记再比较，避免短日文歌名被后缀淹没。报告同时保留 `components.title_raw` 原始评分和 `title_comparison` 实际比较文本，并提示重制版候选；不会移除 `Live` 等演出版本后缀。这只影响候选排序，不证明重制版与原版歌词时间轴一致。
+
+### 下载并自动写入歌词标签
+
+```sh
+# 下载同名歌词文件，默认不写音频标签
+lddc download "/path/to/song.flac" --sources NE
+
+# 递归处理目录，同时写入歌词标签
+lddc download "/path/to/album" --recursive --sources NE QM --write-tags
+
+# 只搜索并预览计划，不获取完整歌词、不写歌词文件或音频标签
+lddc download "/path/to/album" --write-tags --dry-run
+
+# 只嵌入标签，不另存歌词文件
+lddc download "/path/to/song.flac" --write-tags --no-save-sidecar
+
+# 临时指定导出目录和格式
+lddc download "/path/to/album" --output-dir ./lyrics --format srt
+```
+
+也可在配置中设置 `download.write_tags = true`，以后执行 `download` 就会自动写入。内置默认值是 `save_sidecar = true`、`write_tags = false`；命令行 `--no-write-tags` 可覆盖配置。两个输出不能同时关闭。
+
+流程是读取本地元数据、搜索排序、按分数从高到低尝试下载。下载失败或没有可用歌词时尝试下一个候选，最多尝试 `match.top_k` 个；同分时按来源顺序。评分阈值、时长容差和重制版警告沿用 `match`。自动选择仍可能选中不同版本；`--dry-run` 展示的是首个计划候选，实际下载可能因歌词缺失转向下一候选。
+
+音频 `song.flac` 默认对应 `song.lrc`。导出到指定目录时，递归任务保留相对目录结构，例如 `album/disc2/song.flac` 导出为 `lyrics/disc2/song.lrc`。同批不同音频若映射到完全相同的歌词路径，会拒绝处理冲突项。CUE 虚拟分轨不执行下载/写入，应先分轨为独立音频文件。
+
+已有歌词文件默认跳过，用 `--overwrite` 或 `output.overwrite = true` 覆盖；已有歌词标签也默认跳过，用 `--overwrite-tags` 或 `tags.overwrite = true` 覆盖。两种覆盖选项独立。重复执行时会再次搜索元数据，但无需更新的目标会跳过歌词下载和写入。可用 `--no-overwrite` / `--no-overwrite-tags` 临时禁止覆盖。
+
+标签中保存所选语言组合的逐行 LRC 文本，受 `output.languages`、`offset_ms` 和 LRC 时间戳设置控制；歌词文件则使用 `output.format`。选中缺失语言不会自动生成翻译，全部所选语言都缺失则不会写入。JSON 歌词文件要求 `offset_ms = 0`。
+
+结果只返回路径、候选信息、语言列表和写入状态，不在 stdout 回显整段歌词。逐曲目的 `sidecar.status`、`tags.status` 可能为 `written`、`skipped_existing`、`disabled`、`planned`、`not_written`。`selected_candidate` 是实际成功下载的候选，`attempts` 保留此前失败的下载尝试。若歌词文件已保存而标签失败，已保存文件会保留，并通过非零退出码及逐项状态报告。一次批量运行不是跨文件事务；其他曲目会继续处理。
+
+### 把已有本地歌词写入音频
+
+```sh
+lddc tag ./song.flac --lyrics ./song.lrc
+lddc tag ./song.m4a --lyrics ./translated.lrc --languages orig ts --overwrite-tags
+lddc tag ./song.mp3 --lyrics ./song.lrc --offset-ms 100 --dry-run
+```
+
+`tag` 不联网，只处理一个音频文件。它使用同样的语言、偏移、覆盖和备份设置；已有标签且未开启覆盖时返回 `skipped_existing`。
+
+实际标签写入会先复制音频到同目录临时文件，在副本上修改标签并读回验证，再原子替换原路径。默认还会保留第一次写入前的完整音频为 `song.flac.lddc.bak`，已有备份不覆盖。`tags.backup = false` 或 `--no-backup` 可关闭备份；备份和临时副本都需要额外磁盘空间。替换前会检查音频是否在写入期间发生变化，但这不构成跨进程锁；不要让多个写入任务同时处理同一音频。
+
+只修改歌词字段；原歌名、歌手、专辑和封面不由 CLI 重命名或替换。ID3 写入使用 USLT 文本，并清除旧歌词的 USLT/SYLT 变体以免播放器继续读取旧内容；ID3 版本由 `tags.id3_version` 控制（`v2.3` 或 `v2.4`）。FLAC/OGG/Opus/APE 使用 `LYRICS`，M4A 使用 `©lyr`，WMA 使用 `WM/LYRICS` / `Lyrics`。播放器是否显示内嵌 LRC 时间轴取决于其支持，写入验证不代表播放器同步显示验证。
 
 ### 离线转换已有歌词
 
@@ -153,20 +207,20 @@ lddc convert ./input.lrc --format json --offset-ms 0 --output ./lyrics.json
 | 0 | 命令成功；搜索零结果也属于成功 |
 | 1 | 内部错误 |
 | 2 | 参数、配置或输入内容无效 |
-| 3 | 匹配中至少一首没有候选，或没有待匹配音频 |
+| 3 | 匹配/下载中至少一首没有候选，或没有待匹配音频 |
 | 4 | 来源错误；其他成功来源的结果仍保留 |
 | 5 | 文件读写错误 |
 | 6 | 报告的错误全部为来源尝试超时 |
 | 7 | 缺少依赖 |
 | 130 | 用户中断 |
 
-批量结果同时出现文件和来源错误时，`match` 优先报告来源错误；仅文件读取失败则返回 5。存在操作错误时优先于“无候选”返回，完整原因在 `errors`。错误项包含稳定 `code`，并按情况携带 `source`、`path`、`type` 等字段。来源异常不直接回显可能包含凭据的原始异常文本。
+批量结果同时出现文件和来源错误时，优先报告来源错误；只有文件读写错误及不支持的输入时，含文件错误返回 5，仅不支持的输入返回 2。存在操作错误时优先于“无候选”返回，完整原因在 `errors`。错误项包含稳定 `code`，并按情况携带 `source`、`path`、`type` 等字段。来源异常不直接回显可能包含凭据的原始异常文本。
 
 ## 当前范围与验证
 
-本版本提供配置、环境检查、音频检查、远程元数据搜索、候选排序、已有本地歌词转换。尚无远程歌词下载命令、自动标签写入、翻译服务命令、断点续跑或 JSONL 流式输出。现有桌面功能未搬入 CLI。匹配结果也不证明来源一定有歌词。
+本版本提供配置、环境检查、音频检查、远程搜索、候选排序、歌词下载、自动歌词标签写入、已有本地歌词转换。尚无翻译服务命令、断点续跑、JSONL 流式输出或按远程歌单 URL 批量下载。匹配结果不证明来源一定有歌词，实际下载会进一步验证。
 
-离线测试不依赖音乐服务，也不访问用户曲库；使用临时 WAV 和自编测试歌词。运行：
+离线测试不依赖音乐服务，也不访问用户曲库；使用临时音频和自编测试歌词。测试覆盖下载回退、重复跳过、标签读回、失败时保留原文件、首次备份保护和常见格式写入后的解码 PCM 哈希一致性。音频格式集成测试需要本机 `ffmpeg`；没有它时该组测试会跳过。运行：
 
 ```sh
 python -m pip install pytest ruff

@@ -19,6 +19,8 @@ DEFAULTS = {
     "network": {"timeout_seconds": 20.0, "retries": 1, "workers": 3, "proxy": ""},
     "match": {"min_score": 70.0, "duration_tolerance_ms": 4000, "top_k": 5},
     "files": {"recursive": False},
+    "download": {"save_sidecar": True, "write_tags": False},
+    "tags": {"overwrite": False, "backup": True, "id3_version": "v2.3"},
     "output": {
         "format": "lrc",
         "languages": ["orig", "ts"],
@@ -53,6 +55,15 @@ top_k = 5
 
 [files]
 recursive = false
+
+[download]
+save_sidecar = true
+write_tags = false
+
+[tags]
+overwrite = false
+backup = true # Keep the first original audio as <filename>.lddc.bak.
+id3_version = "v2.3"
 
 [output]
 format = "lrc"
@@ -118,6 +129,9 @@ def validate(settings: dict) -> None:
             raise ConfigError(msg)
     if settings["output"]["format"] not in FORMATS:
         msg = f"output.format must be one of {', '.join(FORMATS)}"
+        raise ConfigError(msg)
+    if settings["tags"]["id3_version"] not in ("v2.3", "v2.4"):
+        msg = "tags.id3_version must be v2.3 or v2.4"
         raise ConfigError(msg)
     proxy = settings["network"]["proxy"]
     if proxy:

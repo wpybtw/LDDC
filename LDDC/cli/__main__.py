@@ -22,6 +22,31 @@ class Parser(argparse.ArgumentParser):
         raise config.ConfigError(message)
 
 
+def transfer_commands(commands: argparse._SubParsersAction) -> argparse.ArgumentParser:
+    download = commands.add_parser("download", help="Match local audio, download lyrics and optionally write lyric tags")
+    download.add_argument("path", type=Path)
+    download.add_argument("--recursive", action=argparse.BooleanOptionalAction, default=None)
+    download.add_argument("--dry-run", action="store_true", help="Search and plan only; no lyric downloads, sidecars or tag writes")
+    download.add_argument("--min-score", type=float)
+    download.add_argument("--duration-tolerance-ms", type=int)
+    download.add_argument("--top-k", type=int)
+    download.add_argument("--save-sidecar", action=argparse.BooleanOptionalAction, default=None)
+    download.add_argument("--write-tags", action=argparse.BooleanOptionalAction, default=None)
+    download.add_argument("--output-dir", dest="directory", type=Path)
+    download.add_argument("--format", choices=config.FORMATS)
+    download.add_argument("--overwrite", action=argparse.BooleanOptionalAction, default=None, help="Replace existing sidecars")
+    tag = commands.add_parser("tag", help="Embed an existing local lyric file in one audio file")
+    tag.add_argument("path", type=Path)
+    tag.add_argument("--lyrics", required=True, type=Path)
+    tag.add_argument("--dry-run", action="store_true")
+    for command in (download, tag):
+        command.add_argument("--languages", nargs="+", choices=("orig", "ts", "roma"))
+        command.add_argument("--offset-ms", type=int)
+        command.add_argument("--overwrite-tags", action=argparse.BooleanOptionalAction, default=None)
+        command.add_argument("--backup", action=argparse.BooleanOptionalAction, default=None)
+    return download
+
+
 def parser() -> argparse.ArgumentParser:
     root = Parser(description="LDDC CLI. All command results are schema-versioned JSON. No GUI is started.")
     root.add_argument("--config", help="TOML file; otherwise LDDC_CLI_CONFIG or the platform default")
@@ -51,7 +76,8 @@ def parser() -> argparse.ArgumentParser:
     match.add_argument("--duration-tolerance-ms", type=int)
     match.add_argument("--top-k", type=int)
     match.add_argument("--output", type=Path, help="Save the JSON candidate report, never overwrite an existing report")
-    for command in (search, match):
+    download = transfer_commands(commands)
+    for command in (search, match, download):
         command.add_argument("--sources", nargs="+", choices=config.SOURCES)
         command.add_argument("--limit", type=int)
         command.add_argument("--timeout", type=float)
@@ -85,9 +111,16 @@ def overrides(args: argparse.Namespace) -> dict:
         ("languages", "output", "languages"),
         ("offset_ms", "output", "offset_ms"),
         ("overwrite", "output", "overwrite"),
+        ("directory", "output", "directory"),
+        ("write_tags", "download", "write_tags"),
+        ("save_sidecar", "download", "save_sidecar"),
+        ("overwrite_tags", "tags", "overwrite"),
+        ("backup", "tags", "backup"),
     ]:
         value = getattr(args, field, None)
         if value is not None:
+            if isinstance(value, Path):
+                value = str(value.expanduser().resolve())
             result.setdefault(section, {})[key] = value
     return result
 
@@ -103,8 +136,11 @@ def result_code(data: dict, command: str) -> int:
     if errors:
         if all(error["code"] == "TIMEOUT" for error in errors):
             return EXIT_CODES["timeout"]
-        return EXIT_CODES["file"] if command == "inspect" or all(error["code"] == "READ_FAILED" for error in errors) else EXIT_CODES["provider"]
-    if command == "match" and (not data["items"] or any(item["status"] == "no_match" for item in data["items"])):
+        if all(error["code"] == "UNSUPPORTED_INPUT" for error in errors):
+            return EXIT_CODES["usage"]
+        file_errors = all(error["code"] in ("READ_FAILED", "WRITE_FAILED", "UNSUPPORTED_INPUT") for error in errors)
+        return EXIT_CODES["file"] if command == "inspect" or file_errors else EXIT_CODES["provider"]
+    if command in ("match", "download") and (not data["items"] or any(item["status"] == "no_match" for item in data["items"])):
         return EXIT_CODES["no_match"]
     return 0
 
@@ -124,13 +160,14 @@ def execute(args: argparse.Namespace) -> dict:
         return envelope(
             "capabilities",
             {
-                "commands": ["config", "doctor", "inspect", "search", "match", "convert"],
+                "commands": ["config", "doctor", "inspect", "search", "match", "convert", "download", "tag"],
                 "sources": list(config.SOURCES),
                 "formats": list(config.FORMATS),
                 "defaults": copy.deepcopy(config.DEFAULTS),
                 "exit_codes": EXIT_CODES,
                 "match_writes_audio": False,
-                "remote_lyrics_download": False,
+                "remote_lyrics_download": True,
+                "audio_lyric_tag_writing": True,
                 "resume": False,
             },
         )
@@ -165,6 +202,14 @@ def execute(args: argparse.Namespace) -> dict:
     elif args.command == "convert":
         output = args.output.expanduser().resolve() if args.output else None
         data = backend.convert(args.path.expanduser().resolve(), output, settings, state)
+    elif args.command in ("download", "tag"):
+        from . import download
+
+        audio_path = args.path.expanduser().resolve()
+        if args.command == "download":
+            data = download.download(audio_path, settings, state, args.dry_run)
+        else:
+            data = download.tag(audio_path, args.lyrics.expanduser().resolve(), settings, state, args.dry_run)
     result = envelope(args.command, data, result_code(data, args.command))
     if args.command == "match" and args.output:
         atomic_write(args.output.expanduser().resolve(), json.dumps(result, ensure_ascii=False, indent=2, allow_nan=False) + "\n")

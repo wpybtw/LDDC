@@ -28,6 +28,7 @@ def initialize(state_dir: Path, settings: dict) -> None:
             "add_end_timestamp_line": settings["output"]["add_end_timestamp"],
             "auto_check_update": False,
             "log_level": "ERROR",
+            "ID3_version": settings["tags"]["id3_version"],
         },
     )
 
